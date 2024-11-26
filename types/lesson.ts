@@ -1,17 +1,15 @@
-export type LessonContent = {
-  id: string;
-  title: string;
-  explanation: string;
-  examples: Array<{
-    english: string;
-    turkish: string;
-  }>;
+export type VocabularyItem = {
+  id?: string;
+  question: string;
+  answer: string;
 };
 
 export type Lesson = {
-  id: string;
+  id?: string;
   title: string;
   description: string;
-  content: LessonContent[];
-  isCompleted: boolean;
+  order: number;
+  vocabulary: VocabularyItem[];
+  createdAt: Date;
+  updatedAt: Date;
 }; 

@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/context/AuthContext';
 import { 
   BookOpen, // Learn
   PenTool, // Practice
@@ -15,7 +16,8 @@ import {
   LogIn,
   LogOut,
   Menu,
-  X
+  X,
+  Shield // Admin
 } from 'lucide-react';
 import { ThemeToggle } from "@/components/theme-toggle";
 
@@ -23,26 +25,47 @@ type NavItem = {
   label: string;
   href: string;
   icon: React.ElementType;
+  requiresAuth?: boolean;
+  requiresAdmin?: boolean;
 };
 
+// Replace this with your actual admin email
+const ADMIN_EMAILS = ['test1@test.com']; // The email you use to log in
+
 const navItems: NavItem[] = [
-  { label: 'Learn', href: '/learn', icon: BookOpen },
-  { label: 'Practice', href: '/practice', icon: PenTool },
-  { label: 'Leaderboards', href: '/leaderboards', icon: Trophy },
-  { label: 'Quests', href: '/quests', icon: Target },
-  { label: 'Shop', href: '/shop', icon: ShoppingBag },
-  { label: 'Profile', href: '/profile', icon: User },
-  { label: 'Settings', href: '/settings', icon: Settings },
-  { label: 'Help', href: '/help', icon: HelpCircle },
+  { label: 'Learn', href: '/learn', icon: BookOpen, requiresAuth: true },
+  { label: 'Practice', href: '/practice', icon: PenTool, requiresAuth: true },
+  { label: 'Leaderboards', href: '/leaderboards', icon: Trophy, requiresAuth: true },
+  { label: 'Quests', href: '/quests', icon: Target, requiresAuth: true },
+  { label: 'Shop', href: '/shop', icon: ShoppingBag, requiresAuth: true },
+  { label: 'Profile', href: '/profile', icon: User, requiresAuth: true },
+  { label: 'Settings', href: '/settings', icon: Settings, requiresAuth: true },
+  { label: 'Help', href: '/help', icon: HelpCircle, requiresAuth: false },
+  { label: 'Admin', href: '/admin/lessons', icon: Shield, requiresAuth: true, requiresAdmin: true },
 ];
 
 const Sidebar = () => {
   const [isOpen, setIsOpen] = useState(true);
-  const [isLoggedIn, setIsLoggedIn] = useState(false); // Replace with your auth logic
+  const { user, signOut } = useAuth();
   const pathname = usePathname();
+  const router = useRouter();
 
   const handleToggleSidebar = () => setIsOpen(!isOpen);
-  const handleLogin = () => setIsLoggedIn(!isLoggedIn);
+  
+  const handleAuth = async () => {
+    if (user) {
+      await signOut();
+    } else {
+      router.push('/auth/login');
+    }
+  };
+
+  const isAdmin = user && ADMIN_EMAILS.includes(user.email || '');
+
+  // Filter nav items based on auth state and admin status
+  const visibleNavItems = navItems.filter(item => 
+    (!item.requiresAuth || user) && (!item.requiresAdmin || isAdmin)
+  );
 
   return (
     <>
@@ -67,7 +90,7 @@ const Sidebar = () => {
         <nav className="h-full pt-16 pb-4 px-4 flex flex-col">
           {/* Navigation Items */}
           <div className="flex-1 space-y-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive = pathname === item.href;
               const Icon = item.icon;
               
@@ -99,16 +122,16 @@ const Sidebar = () => {
 
           {/* Auth Button */}
           <button
-            onClick={handleLogin}
+            onClick={handleAuth}
             className="flex items-center gap-4 px-3 py-2 rounded-lg
               hover:bg-gray-100 dark:hover:bg-gray-800
               transition-colors duration-200"
             tabIndex={0}
-            aria-label={isLoggedIn ? 'Log out' : 'Log in'}
+            aria-label={user ? 'Log out' : 'Log in'}
           >
-            {isLoggedIn ? <LogOut size={20} /> : <LogIn size={20} />}
+            {user ? <LogOut size={20} /> : <LogIn size={20} />}
             <span className={`${!isOpen && 'lg:hidden'}`}>
-              {isLoggedIn ? 'Log out' : 'Log in'}
+              {user ? 'Log out' : 'Log in'}
             </span>
           </button>
         </nav>
