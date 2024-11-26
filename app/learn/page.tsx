@@ -1,58 +1,141 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { ChevronRight, BookOpen } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { ChevronRight, Search, Award } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { lessonService } from '@/lib/services/lesson-service';
-import type { Lesson } from '@/types/lesson';
+import { progressService } from '@/lib/services/progress-service';
+import type { Lesson, LessonProgress } from '@/types/lesson';
+import { auth } from '@/lib/firebase';
 
-const LessonCard = ({ lesson }: { lesson: Lesson }) => {
+// New component for the streak counter
+const StreakCounter = ({ streak }: { streak: number }) => (
+  <div className="flex items-center gap-2 bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-300 px-4 py-2 rounded-full">
+    <Award size={20} />
+    <span className="font-semibold">{streak} Day Streak!</span>
+  </div>
+);
+
+// New component for the lesson card
+const LessonCard = ({ 
+  lesson, 
+  index, 
+  progress 
+}: { 
+  lesson: Lesson; 
+  index: number;
+  progress?: LessonProgress;
+}) => {
   const router = useRouter();
+  
+  const handleClick = () => router.push(`/learn/${lesson.id}`);
+
+  const isCompleted = progress?.completed ?? false;
+  const progressPercentage = progress?.progress ?? 0;
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow">
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="text-xl font-semibold mb-2">{lesson.title}</h3>
-          <p className="text-gray-600 dark:text-gray-300 mb-4">{lesson.description}</p>
-          <p className="text-sm text-gray-500">
-            {lesson.vocabulary.length} vocabulary items
-          </p>
+    <div 
+      onClick={handleClick}
+      onKeyDown={(e) => e.key === 'Enter' && handleClick()}
+      role="button"
+      tabIndex={0}
+      className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 
+        hover:bg-gray-100 dark:hover:bg-gray-700
+        transition-colors duration-200 cursor-pointer relative"
+      aria-label={`Start lesson: ${lesson.title}`}
+    >
+      <div className="flex items-center gap-4">
+        <div className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center
+          ${isCompleted 
+            ? 'bg-green-100 dark:bg-green-900' 
+            : 'bg-blue-100 dark:bg-blue-900'}`}>
+          <span className={`font-semibold
+            ${isCompleted 
+              ? 'text-green-600 dark:text-green-300' 
+              : 'text-blue-600 dark:text-blue-300'}`}>
+            {index + 1}
+          </span>
         </div>
-        <BookOpen className="text-blue-500" size={24} />
+        
+        <div className="flex-grow">
+          <h3 className="text-xl font-semibold">{lesson.title}</h3>
+          <div className="flex gap-4 text-sm text-gray-500">
+            <span>{lesson.vocabulary.length} words</span>
+            <span>•</span>
+            <span className="capitalize">{lesson.difficulty}</span>
+            <span>•</span>
+            <span>{lesson.estimatedTime} min</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="w-16">
+            <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full">
+              <div 
+                className="h-full bg-green-500 rounded-full transition-all duration-300"
+                style={{ width: `${progressPercentage}%` }}
+              />
+            </div>
+          </div>
+          <ChevronRight size={24} className="text-blue-500" />
+        </div>
       </div>
-      
-      <button 
-        className="w-full mt-4 flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg transition-colors"
-        onClick={() => router.push(`/learn/${lesson.id}`)}
-      >
-        Start Lesson
-        <ChevronRight size={20} />
-      </button>
     </div>
   );
 };
 
 export default function LearnPage() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [progress, setProgress] = useState<Record<string, LessonProgress>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterDifficulty, setFilterDifficulty] = useState<string>('all');
+  const [streak, setStreak] = useState(0);
 
+  const loadData = useCallback(async () => {
+    try {
+      // Load lessons first
+      const fetchedLessons = await lessonService.getAllLessons();
+      setLessons(fetchedLessons);
+
+      // Then load progress and streak
+      const [fetchedProgress, userStreak] = await Promise.all([
+        progressService.getAllProgress(),
+        progressService.getUserStreak()
+      ]);
+      
+      // Use type assertion to fix TypeScript error
+      setProgress(fetchedProgress as Record<string, LessonProgress>);
+      setStreak(userStreak || 0);
+    } catch (error) {
+      console.error('Error loading lessons:', error);
+      setError('Failed to load lessons. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Add auth state listener
   useEffect(() => {
-    const loadLessons = async () => {
-      try {
-        const fetchedLessons = await lessonService.getAllLessons();
-        setLessons(fetchedLessons);
-      } catch (error) {
-        setError('Failed to load lessons');
-        console.error('Error loading lessons:', error);
-      } finally {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        loadData();
+      } else {
+        setProgress({});
+        setStreak(0);
         setLoading(false);
       }
-    };
+    });
 
-    loadLessons();
-  }, []);
+    return () => unsubscribe();
+  }, [loadData]);
+
+  const filteredLessons = lessons.filter(lesson => {
+    const matchesSearch = lesson.title.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesDifficulty = filterDifficulty === 'all' || lesson.difficulty === filterDifficulty;
+    return matchesSearch && matchesDifficulty;
+  });
 
   if (loading) {
     return (
@@ -82,22 +165,61 @@ export default function LearnPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8 max-w-3xl">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Learn Turkish</h1>
-        <p className="text-gray-600 dark:text-gray-300">
-          Select a lesson below to start learning Turkish grammar and vocabulary
-        </p>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-3xl font-bold">Learn Turkish</h1>
+          {streak > 0 && <StreakCounter streak={streak} />}
+        </div>
+        
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-gray-600 dark:text-gray-300">
+            Select a lesson below to start learning Turkish grammar and vocabulary
+          </p>
+          
+          <div className="flex gap-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+              <input
+                type="text"
+                placeholder="Search lessons..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 
+                  bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none"
+                aria-label="Search lessons"
+              />
+            </div>
+            
+            <select
+              value={filterDifficulty}
+              onChange={(e) => setFilterDifficulty(e.target.value)}
+              className="px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 
+                bg-white dark:bg-gray-800 focus:ring-2 focus:ring-blue-500 outline-none"
+              aria-label="Filter by difficulty"
+            >
+              <option value="all">All Levels</option>
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </div>
+        </div>
       </div>
 
-      {lessons.length === 0 ? (
+      {filteredLessons.length === 0 ? (
         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-          <p>No lessons available yet.</p>
+          <p>No lessons found matching your criteria.</p>
         </div>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {lessons.map((lesson) => (
-            <LessonCard key={lesson.id} lesson={lesson} />
+        <div className="space-y-4">
+          {filteredLessons.map((lesson, index) => (
+            <LessonCard 
+              key={lesson.id} 
+              lesson={lesson} 
+              index={index}
+              progress={progress[lesson.id]}
+            />
           ))}
         </div>
       )}

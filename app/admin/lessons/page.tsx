@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/lib/context/AuthContext';
 import { lessonService } from '@/lib/services/lesson-service';
 import { Button } from '@/components/ui/button';
-import { Pencil, Trash2, X } from 'lucide-react';
+import { Pencil, Trash2, X, Loader2 } from 'lucide-react';
 import type { Lesson, VocabularyItem } from '@/types/lesson';
+import { Textarea } from '@/components/ui/textarea';
 
 export default function AdminLessonsPage() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
@@ -17,10 +18,13 @@ export default function AdminLessonsPage() {
   const [editingLessonId, setEditingLessonId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [order, setOrder] = useState(1);
+  const [order, setOrder] = useState<number>(1);
   const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([
     { question: '', answer: '' }
   ]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showBulkInput, setShowBulkInput] = useState(false);
+  const [bulkVocabulary, setBulkVocabulary] = useState('');
 
   useEffect(() => {
     loadLessons();
@@ -30,6 +34,9 @@ export default function AdminLessonsPage() {
     try {
       const fetchedLessons = await lessonService.getAllLessons();
       setLessons(fetchedLessons);
+      if (!editingLessonId) {
+        setOrder(fetchedLessons.length + 1);
+      }
     } catch (error) {
       setError('Failed to load lessons');
       console.error(error);
@@ -47,7 +54,7 @@ export default function AdminLessonsPage() {
   };
 
   const handleEdit = (lesson: Lesson) => {
-    setEditingLessonId(lesson.id);
+    setEditingLessonId(lesson.id ?? null);
     setTitle(lesson.title);
     setDescription(lesson.description);
     setOrder(lesson.order);
@@ -82,12 +89,40 @@ export default function AdminLessonsPage() {
     setVocabulary(vocabulary.filter((_, i) => i !== index));
   };
 
+  const handleBulkVocabularySubmit = () => {
+    const pairs = bulkVocabulary
+      .split('\n')
+      .filter(line => line.trim() !== '')
+      .map(line => {
+        const separators = ['→', '->'];
+        let [question, answer] = ['', ''];
+        
+        for (const separator of separators) {
+          if (line.includes(separator)) {
+            [question, answer] = line.split(separator).map(s => s.trim());
+            break;
+          }
+        }
+
+        return question && answer ? { question, answer } : null;
+      })
+      .filter((item): item is VocabularyItem => item !== null);
+
+    if (pairs.length > 0) {
+      setVocabulary(pairs);
+      setShowBulkInput(false);
+      setBulkVocabulary('');
+    } else {
+      setError('No valid vocabulary pairs found. Please use format: question → answer');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsSubmitting(true);
 
     try {
-      // Filter out empty vocabulary items
       const filteredVocabulary = vocabulary.filter(
         item => item.question.trim() !== '' && item.answer.trim() !== ''
       );
@@ -110,6 +145,8 @@ export default function AdminLessonsPage() {
     } catch (error) {
       setError(`Failed to ${editingLessonId ? 'update' : 'create'} lesson`);
       console.error(error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -129,79 +166,113 @@ export default function AdminLessonsPage() {
       </h1>
 
       {/* Add/Edit Lesson Form */}
-      <form onSubmit={handleSubmit} className="mb-8 space-y-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Title</label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-            required
-          />
+      <form onSubmit={handleSubmit} className="mb-8 space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Title</label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Order</label>
+              <input
+                type="number"
+                value={order.toString()}
+                onChange={(e) => setOrder(parseInt(e.target.value) || 1)}
+                className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
+                min={1}
+                required
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Description</label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full min-h-[150px] p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
+              placeholder="Enter a detailed description of the lesson..."
+              required
+            />
+          </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Description</label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-            rows={3}
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium mb-1">Order</label>
-          <input
-            type="number"
-            value={order}
-            onChange={(e) => setOrder(parseInt(e.target.value))}
-            className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-            min={1}
-            required
-          />
-        </div>
-
-        {/* Vocabulary Items */}
+        {/* Vocabulary Section */}
         <div className="space-y-4">
-          <label className="block text-sm font-medium mb-1">Vocabulary</label>
-          {vocabulary.map((item, index) => (
-            <div key={index} className="flex gap-2">
-              <input
-                type="text"
-                value={item.question}
-                onChange={(e) => handleVocabularyChange(index, 'question', e.target.value)}
-                placeholder="Question (e.g., house)"
-                className="flex-1 p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-                required
+          <div className="flex justify-between items-center">
+            <label className="block text-sm font-medium">Vocabulary</label>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowBulkInput(!showBulkInput)}
+            >
+              {showBulkInput ? 'Single Entry Mode' : 'Bulk Entry Mode'}
+            </Button>
+          </div>
+
+          {showBulkInput ? (
+            <div className="space-y-4">
+              <Textarea
+                value={bulkVocabulary}
+                onChange={(e) => setBulkVocabulary(e.target.value)}
+                className="w-full min-h-[200px]"
+                placeholder="Enter vocabulary pairs (one per line)&#10;Format: question → answer&#10;Example:&#10;house → ev&#10;cat → kedi"
               />
-              <input
-                type="text"
-                value={item.answer}
-                onChange={(e) => handleVocabularyChange(index, 'answer', e.target.value)}
-                placeholder="Answer (e.g., ev)"
-                className="flex-1 p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-                required
-              />
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => handleRemoveVocabularyItem(index)}
-                disabled={vocabulary.length === 1}
-              >
-                <X size={20} />
+              <Button type="button" onClick={handleBulkVocabularySubmit}>
+                Convert to Vocabulary Items
               </Button>
             </div>
-          ))}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleAddVocabularyItem}
-          >
-            Add Vocabulary Item
-          </Button>
+          ) : (
+            <div className="space-y-4">
+              {vocabulary.map((item, index) => (
+                <div key={index} className="flex gap-2 items-start">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={item.question}
+                      onChange={(e) => handleVocabularyChange(index, 'question', e.target.value)}
+                      className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
+                      placeholder="Question"
+                      required
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      value={item.answer}
+                      onChange={(e) => handleVocabularyChange(index, 'answer', e.target.value)}
+                      className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
+                      placeholder="Answer"
+                      required
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => handleRemoveVocabularyItem(index)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleAddVocabularyItem}
+              >
+                Add Vocabulary Item
+              </Button>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -209,7 +280,8 @@ export default function AdminLessonsPage() {
         )}
 
         <div className="flex gap-2">
-          <Button type="submit">
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {editingLessonId ? 'Update Lesson' : 'Create Lesson'}
           </Button>
           {editingLessonId && (
@@ -219,6 +291,29 @@ export default function AdminLessonsPage() {
           )}
         </div>
       </form>
+
+      {/* Preview Section */}
+      {(title || description || vocabulary.length > 0) && (
+        <div className="mb-8 p-4 border rounded-lg dark:border-gray-700">
+          <h2 className="text-lg font-semibold mb-4">Preview</h2>
+          <div className="space-y-2">
+            <h3 className="font-medium">{title || 'Untitled Lesson'}</h3>
+            <p className="text-gray-600 dark:text-gray-400">{description || 'No description'}</p>
+            {vocabulary.length > 0 && (
+              <div className="mt-4">
+                <h4 className="font-medium text-sm mb-2">Vocabulary Items:</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  {vocabulary.map((item, index) => (
+                    <div key={index} className="text-sm p-2 bg-gray-50 dark:bg-gray-800 rounded">
+                      {item.question} → {item.answer}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Lessons List */}
       <div className="space-y-4">
@@ -232,15 +327,12 @@ export default function AdminLessonsPage() {
                 key={lesson.id}
                 className="border rounded p-4 dark:border-gray-700"
               >
-                <div className="flex justify-between items-start mb-2">
-                  <div>
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm font-medium text-gray-500">
+                      {lesson.order}.
+                    </span>
                     <h3 className="font-semibold">{lesson.title}</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                      {lesson.description}
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-500">
-                      Order: {lesson.order}
-                    </p>
                   </div>
                   <div className="flex gap-2">
                     <Button
@@ -257,16 +349,6 @@ export default function AdminLessonsPage() {
                     >
                       <Trash2 size={16} />
                     </Button>
-                  </div>
-                </div>
-                <div className="mt-2">
-                  <h4 className="font-medium text-sm mb-2">Vocabulary:</h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    {lesson.vocabulary.map((item, index) => (
-                      <div key={index} className="text-sm p-2 bg-gray-50 dark:bg-gray-800 rounded">
-                        {item.question} → {item.answer}
-                      </div>
-                    ))}
                   </div>
                 </div>
               </div>

@@ -4,12 +4,19 @@ export type VocabularyItem = {
   answer: string;
 };
 
-export type Lesson = {
-  id?: string;
+export interface Lesson {
+  id: string;
   title: string;
-  description: string;
-  order: number;
   vocabulary: VocabularyItem[];
-  createdAt: Date;
-  updatedAt: Date;
-}; 
+  difficulty: 'beginner' | 'intermediate' | 'advanced';
+  category: string;
+  estimatedTime: number; // in minutes
+}
+
+export interface LessonProgress {
+  lessonId: string;
+  completed: boolean;
+  lastAccessedAt: Date;
+  completedAt?: Date;
+  progress: number; // 0-100
+} 
