@@ -6,11 +6,14 @@ export type VocabularyItem = {
 
 export interface Lesson {
   id: string;
+  slug: string;
   title: string;
+  content: string;
   vocabulary: VocabularyItem[];
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   category: string;
-  estimatedTime: number; // in minutes
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface LessonProgress {

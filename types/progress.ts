@@ -21,7 +21,7 @@ export type LessonProgress = {
   masteredVocabulary: number;
 };
 
-export type UserProgress = {
+export interface UserProgress {
   id?: string;
   userId: string;
   dailyGoal: number;
@@ -32,6 +32,28 @@ export type UserProgress = {
     date: Date;
     wordsStudied: number;
     correctAnswers: number;
-    timeSpent: number; // in seconds
+    timeSpent: number;
   }[];
-}; 
+  gems: number;
+  league: {
+    name: string;
+    rank: number;
+    division: number;
+    xp: number;  // XP in current league
+    nextRankAt: number;  // XP needed for next rank
+  };
+  dailyQuests: {
+    completed: string[];
+    lastResetDate: Date;
+    progress: {
+      wordsLearned: number;
+      timeSpent: number;
+      lessonsCompleted: number;
+    };
+  };
+  xp: {
+    current: number;
+    level: number;
+    nextLevelAt: number;
+  };
+} 

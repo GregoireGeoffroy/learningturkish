@@ -1,12 +1,185 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/lib/context/AuthContext';
 import { lessonService } from '@/lib/services/lesson-service';
 import { Button } from '@/components/ui/button';
-import { Pencil, Trash2, X, Loader2 } from 'lucide-react';
+import { Pencil, Trash2, Plus, Loader2, Book, Settings, Users } from 'lucide-react';
 import type { Lesson, VocabularyItem } from '@/types/lesson';
-import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+const formatDate = (date: Date | undefined) => {
+  if (!date) return 'N/A';
+  
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}:${month}:${day}`;
+};
+
+const VocabularyForm = ({ 
+  vocabulary, 
+  setVocabulary 
+}: { 
+  vocabulary: VocabularyItem[], 
+  setVocabulary: (items: VocabularyItem[]) => void 
+}) => {
+  const [newQuestion, setNewQuestion] = useState('');
+  const [newAnswer, setNewAnswer] = useState('');
+  const [bulkInput, setBulkInput] = useState('');
+  const [showBulkInput, setShowBulkInput] = useState(false);
+
+  const handleAdd = () => {
+    if (newQuestion.trim() && newAnswer.trim()) {
+      setVocabulary([
+        ...vocabulary,
+        { question: newQuestion.trim(), answer: newAnswer.trim() }
+      ]);
+      setNewQuestion('');
+      setNewAnswer('');
+    }
+  };
+
+  const handleBulkAdd = () => {
+    const newItems = bulkInput
+      .split('\n')
+      .map(line => {
+        const [question, answer] = line.split(':').map(s => s.trim());
+        return question && answer ? { question, answer } : null;
+      })
+      .filter((item): item is VocabularyItem => item !== null);
+
+    if (newItems.length > 0) {
+      setVocabulary([...vocabulary, ...newItems]);
+      setBulkInput('');
+      setShowBulkInput(false);
+    }
+  };
+
+  const handleDelete = (index: number) => {
+    setVocabulary(vocabulary.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setShowBulkInput(!showBulkInput)}
+        >
+          {showBulkInput ? 'Single Entry' : 'Bulk Import'}
+        </Button>
+      </div>
+
+      {showBulkInput ? (
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Bulk Import (one pair per line, format: "english: turkish")
+            </label>
+            <Textarea
+              value={bulkInput}
+              onChange={(e) => setBulkInput(e.target.value)}
+              placeholder="dog: köpek&#10;cat: kedi&#10;bird: kuş"
+              className="min-h-[200px] font-mono"
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              onClick={handleBulkAdd}
+              disabled={!bulkInput.trim()}
+            >
+              Add All
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-end gap-4">
+          <div className="flex-1">
+            <label className="block text-sm font-medium mb-1">English</label>
+            <Input
+              value={newQuestion}
+              onChange={(e) => setNewQuestion(e.target.value)}
+              placeholder="Enter English word/phrase"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-sm font-medium mb-1">Turkish</label>
+            <Input
+              value={newAnswer}
+              onChange={(e) => setNewAnswer(e.target.value)}
+              placeholder="Enter Turkish translation"
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={handleAdd}
+            disabled={!newQuestion.trim() || !newAnswer.trim()}
+          >
+            Add
+          </Button>
+        </div>
+      )}
+
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>English</TableHead>
+              <TableHead>Turkish</TableHead>
+              <TableHead className="w-[100px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {vocabulary.map((item, index) => (
+              <TableRow key={index}>
+                <TableCell>{item.question}</TableCell>
+                <TableCell>{item.answer}</TableCell>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDelete(index)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+    </div>
+  );
+};
 
 export default function AdminLessonsPage() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
@@ -15,16 +188,9 @@ export default function AdminLessonsPage() {
   const { user } = useAuth();
 
   // Form state
-  const [editingLessonId, setEditingLessonId] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [order, setOrder] = useState<number>(1);
-  const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([
-    { question: '', answer: '' }
-  ]);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showBulkInput, setShowBulkInput] = useState(false);
-  const [bulkVocabulary, setBulkVocabulary] = useState('');
+  const [editingLesson, setEditingLesson] = useState<Partial<Lesson> | null>(null);
+  const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
     loadLessons();
@@ -34,9 +200,6 @@ export default function AdminLessonsPage() {
     try {
       const fetchedLessons = await lessonService.getAllLessons();
       setLessons(fetchedLessons);
-      if (!editingLessonId) {
-        setOrder(fetchedLessons.length + 1);
-      }
     } catch (error) {
       setError('Failed to load lessons');
       console.error(error);
@@ -45,109 +208,158 @@ export default function AdminLessonsPage() {
     }
   };
 
-  const resetForm = () => {
-    setEditingLessonId(null);
-    setTitle('');
-    setDescription('');
-    setOrder(lessons.length + 1);
-    setVocabulary([{ question: '', answer: '' }]);
-  };
-
   const handleEdit = (lesson: Lesson) => {
-    setEditingLessonId(lesson.id ?? null);
-    setTitle(lesson.title);
-    setDescription(lesson.description);
-    setOrder(lesson.order);
+    setEditingLesson(lesson);
     setVocabulary(lesson.vocabulary);
+    setIsEditing(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this lesson?')) {
+  const handleNewLesson = () => {
+    setEditingLesson({
+      title: '',
+      content: '',
+      difficulty: 'beginner',
+      category: 'general',
+      vocabulary: []
+    });
+    setVocabulary([]);
+    setIsEditing(false);
+  };
+
+  const handleDelete = async (lessonId: string) => {
+    if (!confirm('Are you sure you want to delete this lesson?')) {
       return;
     }
 
     try {
-      await lessonService.deleteLesson(id);
-      await loadLessons();
+      await lessonService.deleteLesson(lessonId);
+      loadLessons();
     } catch (error) {
+      console.error('Error deleting lesson:', error);
       setError('Failed to delete lesson');
-      console.error(error);
     }
   };
 
-  const handleAddVocabularyItem = () => {
-    setVocabulary([...vocabulary, { question: '', answer: '' }]);
-  };
+  const LessonForm = () => {
+    const formRef = useRef<HTMLFormElement>(null);
 
-  const handleVocabularyChange = (index: number, field: 'question' | 'answer', value: string) => {
-    const newVocabulary = [...vocabulary];
-    newVocabulary[index] = { ...newVocabulary[index], [field]: value };
-    setVocabulary(newVocabulary);
-  };
-
-  const handleRemoveVocabularyItem = (index: number) => {
-    setVocabulary(vocabulary.filter((_, i) => i !== index));
-  };
-
-  const handleBulkVocabularySubmit = () => {
-    const pairs = bulkVocabulary
-      .split('\n')
-      .filter(line => line.trim() !== '')
-      .map(line => {
-        const separators = ['→', '->'];
-        let [question, answer] = ['', ''];
-        
-        for (const separator of separators) {
-          if (line.includes(separator)) {
-            [question, answer] = line.split(separator).map(s => s.trim());
-            break;
-          }
-        }
-
-        return question && answer ? { question, answer } : null;
-      })
-      .filter((item): item is VocabularyItem => item !== null);
-
-    if (pairs.length > 0) {
-      setVocabulary(pairs);
-      setShowBulkInput(false);
-      setBulkVocabulary('');
-    } else {
-      setError('No valid vocabulary pairs found. Please use format: question → answer');
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsSubmitting(true);
-
-    try {
-      const filteredVocabulary = vocabulary.filter(
-        item => item.question.trim() !== '' && item.answer.trim() !== ''
-      );
-
+    const handleSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const formData = new FormData(e.target as HTMLFormElement);
+      
       const lessonData = {
-        title,
-        description,
-        order,
-        vocabulary: filteredVocabulary,
+        title: formData.get('title') as string,
+        content: formData.get('content') as string,
+        difficulty: formData.get('difficulty') as Lesson['difficulty'],
+        category: formData.get('category') as string,
+        vocabulary: vocabulary
       };
 
-      if (editingLessonId) {
-        await lessonService.updateLesson(editingLessonId, lessonData);
-      } else {
-        await lessonService.createLesson(lessonData);
-      }
+      try {
+        if (isEditing && editingLesson?.id) {
+          await lessonService.updateLesson(editingLesson.id, lessonData);
+        } else {
+          await lessonService.createLesson(lessonData);
+        }
 
-      resetForm();
-      await loadLessons();
-    } catch (error) {
-      setError(`Failed to ${editingLessonId ? 'update' : 'create'} lesson`);
-      console.error(error);
-    } finally {
-      setIsSubmitting(false);
-    }
+        // Reset form and reload lessons
+        setEditingLesson(null);
+        setVocabulary([]);
+        setIsEditing(false);
+        
+        // Force a refresh of the lessons list
+        await loadLessons();
+      } catch (error) {
+        console.error('Error saving lesson:', error);
+      }
+    };
+
+    return (
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle>{isEditing ? 'Edit Lesson' : 'Create New Lesson'}</CardTitle>
+          <CardDescription>
+            {isEditing ? 'Update the lesson details below.' : 'Fill in the lesson details below.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form ref={formRef} onSubmit={handleSubmit} className="space-y-8">
+            <div>
+              <label className="block text-sm font-medium mb-1">Title</label>
+              <Input
+                name="title"
+                defaultValue={editingLesson?.title || ''}
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Content</label>
+              <Textarea
+                name="content"
+                defaultValue={editingLesson?.content || ''}
+                className="min-h-[400px] resize-y"
+                placeholder="Enter lesson content here..."
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Difficulty</label>
+                <select
+                  name="difficulty"
+                  defaultValue={editingLesson?.difficulty || 'beginner'}
+                  className="w-full px-3 py-2 border rounded-md"
+                  required
+                >
+                  <option value="beginner">Beginner</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="advanced">Advanced</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Category</label>
+                <Input
+                  name="category"
+                  defaultValue={editingLesson?.category || ''}
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-4">Vocabulary</label>
+              <VocabularyForm 
+                vocabulary={vocabulary}
+                setVocabulary={setVocabulary}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingLesson(null);
+                  setVocabulary([]);
+                  setIsEditing(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button 
+                type="submit"
+                disabled={vocabulary.length === 0}
+              >
+                {isEditing ? 'Update Lesson' : 'Create Lesson'}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    );
   };
 
   if (!user) {
@@ -160,202 +372,138 @@ export default function AdminLessonsPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">
-        {editingLessonId ? 'Edit Lesson' : 'Create New Lesson'}
-      </h1>
+    <div className="container mx-auto px-4 py-8">
+      <Tabs defaultValue="lessons" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="lessons">
+            <Book className="h-4 w-4 mr-2" />
+            Lessons
+          </TabsTrigger>
+          <TabsTrigger value="users">
+            <Users className="h-4 w-4 mr-2" />
+            Users
+          </TabsTrigger>
+          <TabsTrigger value="settings">
+            <Settings className="h-4 w-4 mr-2" />
+            Settings
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Add/Edit Lesson Form */}
-      <form onSubmit={handleSubmit} className="mb-8 space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Title</label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-                required
-              />
+        <TabsContent value="lessons">
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <h1 className="text-3xl font-bold">Manage Lessons</h1>
+              {!editingLesson && (
+                <Button onClick={handleNewLesson}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add Lesson
+                </Button>
+              )}
             </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-1">Order</label>
-              <input
-                type="number"
-                value={order.toString()}
-                onChange={(e) => setOrder(parseInt(e.target.value) || 1)}
-                className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-                min={1}
-                required
-              />
-            </div>
-          </div>
+            {editingLesson && <LessonForm />}
 
-          <div>
-            <label className="block text-sm font-medium mb-1">Description</label>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full min-h-[150px] p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-              placeholder="Enter a detailed description of the lesson..."
-              required
-            />
-          </div>
-        </div>
-
-        {/* Vocabulary Section */}
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <label className="block text-sm font-medium">Vocabulary</label>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowBulkInput(!showBulkInput)}
-            >
-              {showBulkInput ? 'Single Entry Mode' : 'Bulk Entry Mode'}
-            </Button>
-          </div>
-
-          {showBulkInput ? (
-            <div className="space-y-4">
-              <Textarea
-                value={bulkVocabulary}
-                onChange={(e) => setBulkVocabulary(e.target.value)}
-                className="w-full min-h-[200px]"
-                placeholder="Enter vocabulary pairs (one per line)&#10;Format: question → answer&#10;Example:&#10;house → ev&#10;cat → kedi"
-              />
-              <Button type="button" onClick={handleBulkVocabularySubmit}>
-                Convert to Vocabulary Items
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {vocabulary.map((item, index) => (
-                <div key={index} className="flex gap-2 items-start">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={item.question}
-                      onChange={(e) => handleVocabularyChange(index, 'question', e.target.value)}
-                      className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-                      placeholder="Question"
-                      required
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      value={item.answer}
-                      onChange={(e) => handleVocabularyChange(index, 'answer', e.target.value)}
-                      className="w-full p-2 border rounded dark:bg-gray-800 dark:border-gray-700"
-                      placeholder="Answer"
-                      required
-                    />
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    onClick={() => handleRemoveVocabularyItem(index)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleAddVocabularyItem}
-              >
-                Add Vocabulary Item
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {error && (
-          <div className="text-red-500 text-sm">{error}</div>
-        )}
-
-        <div className="flex gap-2">
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {editingLessonId ? 'Update Lesson' : 'Create Lesson'}
-          </Button>
-          {editingLessonId && (
-            <Button type="button" variant="outline" onClick={resetForm}>
-              Cancel Edit
-            </Button>
-          )}
-        </div>
-      </form>
-
-      {/* Preview Section */}
-      {(title || description || vocabulary.length > 0) && (
-        <div className="mb-8 p-4 border rounded-lg dark:border-gray-700">
-          <h2 className="text-lg font-semibold mb-4">Preview</h2>
-          <div className="space-y-2">
-            <h3 className="font-medium">{title || 'Untitled Lesson'}</h3>
-            <p className="text-gray-600 dark:text-gray-400">{description || 'No description'}</p>
-            {vocabulary.length > 0 && (
-              <div className="mt-4">
-                <h4 className="font-medium text-sm mb-2">Vocabulary Items:</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  {vocabulary.map((item, index) => (
-                    <div key={index} className="text-sm p-2 bg-gray-50 dark:bg-gray-800 rounded">
-                      {item.question} → {item.answer}
-                    </div>
-                  ))}
-                </div>
-              </div>
+            {loading ? (
+              <Card>
+                <CardContent className="flex items-center justify-center p-6">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </CardContent>
+              </Card>
+            ) : error ? (
+              <Alert variant="destructive">
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            ) : (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Existing Lessons</CardTitle>
+                  <CardDescription>
+                    Manage your Turkish language lessons here.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-[600px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Title</TableHead>
+                          <TableHead>Difficulty</TableHead>
+                          <TableHead>Words</TableHead>
+                          <TableHead>Category</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead>Last Updated</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {lessons.map((lesson) => (
+                          <TableRow key={lesson.id}>
+                            <TableCell>{lesson.title}</TableCell>
+                            <TableCell>
+                              <Badge variant={
+                                lesson.difficulty === 'beginner' ? 'default' :
+                                lesson.difficulty === 'intermediate' ? 'secondary' :
+                                'outline'
+                              }>
+                                {lesson.difficulty}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{lesson.vocabulary.length}</TableCell>
+                            <TableCell>{lesson.category}</TableCell>
+                            <TableCell>{formatDate(lesson.createdAt)}</TableCell>
+                            <TableCell>{formatDate(lesson.updatedAt)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleEdit(lesson)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(lesson.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
             )}
           </div>
-        </div>
-      )}
+        </TabsContent>
 
-      {/* Lessons List */}
-      <div className="space-y-4">
-        <h2 className="text-xl font-semibold">Existing Lessons</h2>
-        {loading ? (
-          <p>Loading lessons...</p>
-        ) : (
-          <div className="space-y-4">
-            {lessons.map((lesson) => (
-              <div
-                key={lesson.id}
-                className="border rounded p-4 dark:border-gray-700"
-              >
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm font-medium text-gray-500">
-                      {lesson.order}.
-                    </span>
-                    <h3 className="font-semibold">{lesson.title}</h3>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleEdit(lesson)}
-                    >
-                      <Pencil size={16} />
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDelete(lesson.id!)}
-                    >
-                      <Trash2 size={16} />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+        <TabsContent value="users">
+          <Card>
+            <CardHeader>
+              <CardTitle>User Management</CardTitle>
+              <CardDescription>Manage user accounts and permissions.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {/* User management content */}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="settings">
+          <Card>
+            <CardHeader>
+              <CardTitle>Settings</CardTitle>
+              <CardDescription>Configure application settings.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {/* Settings content */}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 } 

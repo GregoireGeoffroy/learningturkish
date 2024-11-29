@@ -9,10 +9,14 @@ import {
   Timestamp,
   serverTimestamp,
   updateDoc,
+  arrayUnion,
+  increment,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import type { VocabularyProgress, UserProgress, LessonProgress } from '@/types/progress';
 import { auth } from '../firebase/config';
+import { lessonService } from '../services/lesson-service';
+import { xpService } from '../services/xp-service';
 
 const VOCAB_PROGRESS_COLLECTION = 'vocabularyProgress';
 const USER_PROGRESS_COLLECTION = 'userProgress';
@@ -22,6 +26,7 @@ const SRS_INTERVALS = [1, 3, 7, 14, 30, 90];
 
 // Default daily goal
 const DEFAULT_DAILY_GOAL = 20;
+const INITIAL_GEMS = 0;
 
 interface PracticeHistoryEntry {
   date: Timestamp;
@@ -39,13 +44,68 @@ interface FirestoreUserProgress {
   practiceHistory: PracticeHistoryEntry[];
 }
 
+interface UserProgress {
+  userId: string;
+  dailyGoal: number;
+  currentStreak: number;
+  longestStreak: number;
+  lastPracticeDate: Date;
+  practiceHistory: PracticeHistoryEntry[];
+  gems: number;
+  league: {
+    name: string;
+    rank: number;
+    division: number;
+  };
+  dailyQuests?: {
+    completed: string[];
+    lastResetDate: Date;
+  };
+  xp: {
+    current: number;
+    level: number;
+    nextLevelAt: number;
+  };
+}
+
+const createInitialProgress = (userId: string): Omit<UserProgress, 'id'> => ({
+  userId,
+  dailyGoal: DEFAULT_DAILY_GOAL,
+  currentStreak: 0,
+  longestStreak: 0,
+  lastPracticeDate: new Date(),
+  practiceHistory: [],
+  gems: INITIAL_GEMS,
+  league: {
+    name: 'Bronze',
+    rank: 1,
+    division: 1,
+    xp: 0,
+    nextRankAt: 50
+  },
+  xp: {
+    current: 0,
+    level: 1,
+    nextLevelAt: 100
+  },
+  dailyQuests: {
+    completed: [],
+    lastResetDate: new Date(),
+    progress: {
+      wordsLearned: 0,
+      timeSpent: 0,
+      lessonsCompleted: 0
+    }
+  }
+});
+
 export const progressService = {
-  async getVocabularyProgress(userId: string, lessonId: string) {
+  async getVocabularyProgress(userId: string, slug: string) {
     try {
       const q = query(
         collection(db, VOCAB_PROGRESS_COLLECTION),
         where('userId', '==', userId),
-        where('lessonId', '==', lessonId)
+        where('slug', '==', slug)
       );
       const querySnapshot = await getDocs(q);
       
@@ -63,13 +123,13 @@ export const progressService = {
 
   async updateVocabularyProgress(
     userId: string,
-    lessonId: string,
+    slug: string,
     vocabularyId: string,
     isCorrect: boolean,
     timeSpent: number
   ) {
     try {
-      const progressId = `${userId}_${lessonId}_${vocabularyId}`;
+      const progressId = `${userId}_${slug}_${vocabularyId}`;
       const docRef = doc(db, VOCAB_PROGRESS_COLLECTION, progressId);
       const docSnap = await getDoc(docRef);
 
@@ -96,7 +156,7 @@ export const progressService = {
 
         await setDoc(docRef, {
           userId,
-          lessonId,
+          slug,
           vocabularyId,
           correctCount: isCorrect ? 1 : 0,
           incorrectCount: isCorrect ? 0 : 1,
@@ -121,22 +181,16 @@ export const progressService = {
 
       if (!docSnap.exists()) {
         // Initialize user progress if it doesn't exist
-        const initialProgress: Omit<UserProgress, 'id'> = {
-          userId,
-          dailyGoal: DEFAULT_DAILY_GOAL,
-          currentStreak: 0,
-          longestStreak: 0,
-          lastPracticeDate: new Date(),
-          practiceHistory: [],
-        };
+        const initialProgress = createInitialProgress(userId);
         await setDoc(docRef, {
           ...initialProgress,
           lastPracticeDate: serverTimestamp(),
+          lastResetDate: serverTimestamp()
         });
         return { id: userId, ...initialProgress };
       }
 
-      const data = docSnap.data() as FirestoreUserProgress;
+      const data = docSnap.data();
       return {
         id: docSnap.id,
         userId: data.userId,
@@ -144,12 +198,34 @@ export const progressService = {
         currentStreak: data.currentStreak,
         longestStreak: data.longestStreak,
         lastPracticeDate: data.lastPracticeDate.toDate(),
-        practiceHistory: data.practiceHistory.map(entry => ({
+        practiceHistory: data.practiceHistory?.map((entry: any) => ({
           date: entry.date.toDate(),
           wordsStudied: entry.wordsStudied,
           correctAnswers: entry.correctAnswers,
           timeSpent: entry.timeSpent,
-        })),
+        })) || [],
+        gems: data.gems || INITIAL_GEMS,
+        league: data.league || {
+          name: 'Bronze',
+          rank: 1,
+          division: 1,
+          xp: 0,
+          nextRankAt: 50
+        },
+        xp: data.xp || {
+          current: 0,
+          level: 1,
+          nextLevelAt: 100
+        },
+        dailyQuests: data.dailyQuests || {
+          completed: [],
+          lastResetDate: new Date(),
+          progress: {
+            wordsLearned: 0,
+            timeSpent: 0,
+            lessonsCompleted: 0
+          }
+        }
       };
     } catch (error) {
       console.error('Error getting user progress:', error);
@@ -272,9 +348,9 @@ export const progressService = {
       
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        if (data.lessonId) {
-          progress[data.lessonId] = {
-            lessonId: data.lessonId,
+        if (data.slug) {
+          progress[data.slug] = {
+            slug: data.slug,
             completed: data.completed || false,
             lastAccessedAt: data.lastAccessedAt?.toDate() || new Date(),
             completedAt: data.completedAt?.toDate() || undefined,
@@ -310,19 +386,32 @@ export const progressService = {
     }
   },
 
-  async updateProgress(lessonId: string, progress: number): Promise<void> {
+  async updateProgress(slug: string, progress: number): Promise<void> {
     try {
       const userId = auth.currentUser?.uid;
       if (!userId) {
         return;
       }
 
-      const progressId = `${userId}_${lessonId}`;
+      // Try to get lesson by ID first
+      let lesson = await lessonService.getLesson(slug);
+      
+      // If not found, try by slug
+      if (!lesson) {
+        lesson = await lessonService.getLessonBySlug(slug);
+      }
+
+      if (!lesson) {
+        console.error('Lesson not found');
+        return;
+      }
+
+      const progressId = `${userId}_${lesson.id}`;
       const progressRef = doc(db, 'lessonProgress', progressId);
       
       await setDoc(progressRef, {
         userId,
-        lessonId,
+        slug: lesson.slug,  // Always use the lesson ID for storage
         progress,
         lastAccessedAt: serverTimestamp(),
         completed: progress === 100,
@@ -330,6 +419,104 @@ export const progressService = {
       }, { merge: true });
     } catch (error) {
       console.error('Error updating lesson progress:', error);
+      throw error;
+    }
+  },
+
+  async updateGems(userId: string, amount: number): Promise<void> {
+    try {
+      const userProgress = await this.getUserProgress(userId);
+      if (!userProgress) return;
+
+      const userRef = doc(db, USER_PROGRESS_COLLECTION, userProgress.id);
+      await updateDoc(userRef, {
+        gems: (userProgress.gems || 0) + amount
+      });
+    } catch (error) {
+      console.error('Error updating gems:', error);
+      throw error;
+    }
+  },
+
+  async updateQuestProgress(
+    userId: string,
+    type: 'words' | 'time' | 'lessons',
+    amount: number
+  ): Promise<void> {
+    try {
+      const userProgress = await this.getUserProgress(userId);
+      if (!userProgress?.id) return;
+
+      const userRef = doc(db, USER_PROGRESS_COLLECTION, userProgress.id);
+      
+      // Initialize daily quests if not exists
+      if (!userProgress.dailyQuests) {
+        await updateDoc(userRef, {
+          dailyQuests: {
+            completed: [],
+            lastResetDate: serverTimestamp(),
+            progress: {
+              wordsLearned: 0,
+              timeSpent: 0,
+              lessonsCompleted: 0
+            }
+          }
+        });
+        return;
+      }
+
+      // Reset progress if it's a new day
+      const lastReset = userProgress.dailyQuests.lastResetDate;
+      const now = new Date();
+      if (lastReset && now.getDate() !== lastReset.getDate()) {
+        await updateDoc(userRef, {
+          'dailyQuests.completed': [],
+          'dailyQuests.lastResetDate': serverTimestamp(),
+          'dailyQuests.progress': {
+            wordsLearned: 0,
+            timeSpent: 0,
+            lessonsCompleted: 0
+          }
+        });
+        return;
+      }
+
+      // Update the specific progress type
+      const progressField = type === 'words' ? 'wordsLearned' : 
+                           type === 'time' ? 'timeSpent' : 'lessonsCompleted';
+      
+      await updateDoc(userRef, {
+        [`dailyQuests.progress.${progressField}`]: increment(amount)
+      });
+
+    } catch (error) {
+      console.error('Error updating quest progress:', error);
+      throw error;
+    }
+  },
+
+  async addXP(userId: string, amount: number): Promise<void> {
+    try {
+      const userProgress = await this.getUserProgress(userId);
+      if (!userProgress?.id) return;
+
+      const currentXP = userProgress.xp.current + amount;
+      const newXPInfo = xpService.calculateLevel(currentXP);
+      const newLeagueInfo = xpService.calculateLeague(currentXP);
+
+      const userRef = doc(db, USER_PROGRESS_COLLECTION, userProgress.id);
+      await updateDoc(userRef, {
+        xp: newXPInfo,
+        league: newLeagueInfo
+      });
+
+      // If level increased, give gems reward
+      if (newXPInfo.level > userProgress.xp.level) {
+        const gemsReward = newXPInfo.level * 5; // 5 gems per level
+        await this.updateGems(userId, gemsReward);
+      }
+    } catch (error) {
+      console.error('Error updating XP:', error);
       throw error;
     }
   }

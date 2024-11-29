@@ -1,32 +1,91 @@
 import {
   collection,
   doc,
-  addDoc,
   updateDoc,
   deleteDoc,
   getDocs,
   getDoc,
   query,
-  orderBy,
   Timestamp,
   serverTimestamp,
+  setDoc,
+  where,
+  limit,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import type { Lesson } from '@/types/lesson';
+import slugify from 'slugify';
 
 const LESSONS_COLLECTION = 'lessons';
 
+export const PRACTICE_MODES = {
+  hangman: {
+    name: 'Hangman',
+    description: 'Guess the word one letter at a time',
+    icon: 'game-controller',
+  },
+} as const
+
 export const lessonService = {
-  async createLesson(lesson: Omit<Lesson, 'id' | 'createdAt' | 'updatedAt'>) {
+  createSlug(title: string): string {
+    return slugify(title, {
+      lower: true,
+      strict: true,
+      remove: /[*+~.()'"!:@]/g
+    });
+  },
+
+  async createLesson(lessonData: Omit<Lesson, 'id' | 'createdAt' | 'updatedAt'>) {
     try {
-      const docRef = await addDoc(collection(db, LESSONS_COLLECTION), {
-        ...lesson,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      const docRef = doc(collection(db, 'lessons'));
+      const now = serverTimestamp();
+      const slug = this.createSlug(lessonData.title);
+      
+      await setDoc(docRef, {
+        ...lessonData,
+        id: docRef.id,
+        slug,
+        createdAt: now,
+        updatedAt: now
       });
-      return docRef.id;
+
+      return {
+        ...lessonData,
+        id: docRef.id,
+        slug,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
     } catch (error) {
       console.error('Error creating lesson:', error);
+      throw error;
+    }
+  },
+
+  async getLessonBySlug(slug: string): Promise<Lesson | null> {
+    try {
+      const q = query(
+        collection(db, LESSONS_COLLECTION),
+        where('slug', '==', slug),
+        limit(1)
+      );
+      
+      const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty) {
+        return null;
+      }
+
+      const doc = querySnapshot.docs[0];
+      const data = doc.data();
+      
+      return {
+        ...data,
+        id: doc.id,
+        createdAt: data.createdAt?.toDate() || new Date(),
+        updatedAt: data.updatedAt?.toDate() || new Date()
+      } as Lesson;
+    } catch (error) {
+      console.error('Error getting lesson by slug:', error);
       throw error;
     }
   },
@@ -34,10 +93,16 @@ export const lessonService = {
   async updateLesson(id: string, lesson: Partial<Omit<Lesson, 'id' | 'createdAt' | 'updatedAt'>>) {
     try {
       const docRef = doc(db, LESSONS_COLLECTION, id);
-      await updateDoc(docRef, {
+      const updates = {
         ...lesson,
         updatedAt: serverTimestamp(),
-      });
+      };
+      
+      if (lesson.title) {
+        updates.slug = this.createSlug(lesson.title);
+      }
+      
+      await updateDoc(docRef, updates);
     } catch (error) {
       console.error('Error updating lesson:', error);
       throw error;
@@ -78,18 +143,17 @@ export const lessonService = {
 
   async getAllLessons(): Promise<Lesson[]> {
     try {
-      const q = query(
-        collection(db, LESSONS_COLLECTION),
-        orderBy('order', 'asc')
-      );
-      const querySnapshot = await getDocs(q);
-      
-      return querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: (doc.data().createdAt as Timestamp).toDate(),
-        updatedAt: (doc.data().updatedAt as Timestamp).toDate(),
-      })) as Lesson[];
+      const querySnapshot = await getDocs(collection(db, 'lessons'));
+      return querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          ...data,
+          id: doc.id,
+          // Convert Firestore Timestamps to JavaScript Dates
+          createdAt: data.createdAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date()
+        } as Lesson;
+      });
     } catch (error) {
       console.error('Error getting lessons:', error);
       throw error;
