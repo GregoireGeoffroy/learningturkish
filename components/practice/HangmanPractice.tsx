@@ -33,14 +33,12 @@ export const HangmanPractice = ({ vocabulary, lesson }: HangmanPracticeProps) =>
     gemsEarned: number
   } | null>(null)
   const [practiceStartTime] = useState<number>(Date.now())
+  const [currentPosition, setCurrentPosition] = useState(0)
 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
   const { user } = useAuth()
   const currentItem = vocabulary[currentIndex]
   const wordSegments = currentItem.answer.split(' ')
-
-  // Add a ref to track input position
-  const inputPosition = useRef(0)
 
   useEffect(() => {
     if (user) {
@@ -52,13 +50,11 @@ export const HangmanPractice = ({ vocabulary, lesson }: HangmanPracticeProps) =>
     setLetters(Array(currentItem.answer.length).fill(''))
     setShowAnswer(false)
     setIsCorrect(false)
-    inputPosition.current = 0
+    setCurrentPosition(0)
     
-    setTimeout(() => {
-      if (inputRefs.current[0]) {
-        inputRefs.current[0].focus()
-      }
-    }, 0)
+    if (inputRefs.current[0]) {
+      inputRefs.current[0].focus()
+    }
   }, [currentItem.answer])
 
   const loadUserProgress = async () => {
@@ -98,7 +94,6 @@ export const HangmanPractice = ({ vocabulary, lesson }: HangmanPracticeProps) =>
       // Reset states
       setShowAnswer(false)
       setIsCorrect(false)
-      inputPosition.current = 0
 
       // Handle progress updates in the background
       Promise.all([
@@ -144,22 +139,36 @@ export const HangmanPractice = ({ vocabulary, lesson }: HangmanPracticeProps) =>
     soundManager.play(isAnswerCorrect ? 'correct' : 'incorrect')
   }
 
-  // Add helper function to check if word is complete
-  const isWordComplete = () => {
-    const totalLength = currentItem.answer
-      .split('')
-      .filter(char => char !== ' ')
-      .length
-    
-    const filledLetters = letters.filter(letter => letter).length
-    return filledLetters === totalLength
+  const handleInputChange = (index: number, value: string) => {
+    if (!value) {
+      // Handle deletion directly here
+      setLetters(prev => {
+        const newLetters = [...prev]
+        newLetters[index] = ''
+        return newLetters
+      })
+      return
+    }
+
+    // Handle new letter input
+    const letter = value.slice(-1)
+    setLetters(prev => {
+      const newLetters = [...prev]
+      newLetters[index] = letter
+      return newLetters
+    })
+
+    // Update current position and move focus
+    setCurrentPosition(index + 1)
+    if (index < currentItem.answer.length - 1) {
+      inputRefs.current[index + 1]?.focus()
+    }
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>, index: number) => {
     if (e.key === 'Enter') {
       e.preventDefault()
-      // Use new helper function
-      if (!showAnswer && isWordComplete()) {
+      if (!showAnswer) {
         checkWord()
       } else if (showAnswer) {
         handleNext()
@@ -170,59 +179,44 @@ export const HangmanPractice = ({ vocabulary, lesson }: HangmanPracticeProps) =>
     if (e.key === 'Backspace') {
       if (!letters[index]) {
         e.preventDefault()
-        // Only move back if we're not at the first input
         if (index > 0) {
-          // Clear previous letter
           setLetters(prev => {
             const newLetters = [...prev]
             newLetters[index - 1] = ''
             return newLetters
           })
-          // Move focus back
+          setCurrentPosition(index - 1)
           inputRefs.current[index - 1]?.focus()
-          inputPosition.current = index - 1
         }
       }
     }
-  }
 
-  const handleInputChange = (index: number, value: string) => {
-    if (!value) {
-      // Don't do anything on empty value - let handleKeyDown handle backspace
-      return
+    // Update current position on navigation
+    if (e.key === 'ArrowLeft' && index > 0) {
+      e.preventDefault()
+      setCurrentPosition(index - 1)
+      inputRefs.current[index - 1]?.focus()
     }
-
-    const letter = value.slice(-1)
-    setLetters(prev => {
-      const newLetters = [...prev]
-      newLetters[index] = letter
-      return newLetters
-    })
-
-    // Update position ref
-    inputPosition.current = index
-
-    // Move to next input if available
-    if (index < currentItem.answer.length - 1) {
+    if (e.key === 'ArrowRight' && index < currentItem.answer.length - 1) {
+      e.preventDefault()
+      setCurrentPosition(index + 1)
       inputRefs.current[index + 1]?.focus()
-      inputPosition.current = index + 1
     }
   }
 
   const insertSpecialCharacter = (char: string) => {
-    const currentPos = inputPosition.current
-    if (currentPos < currentItem.answer.length && !showAnswer) {
-      // Update letter at current position
+    if (currentPosition < currentItem.answer.length && !showAnswer) {
+      // Insert at current position
       setLetters(prev => {
         const newLetters = [...prev]
-        newLetters[currentPos] = char
+        newLetters[currentPosition] = char
         return newLetters
       })
 
       // Move to next position if available
-      if (currentPos < currentItem.answer.length - 1) {
-        inputRefs.current[currentPos + 1]?.focus()
-        inputPosition.current = currentPos + 1
+      if (currentPosition < currentItem.answer.length - 1) {
+        setCurrentPosition(currentPosition + 1)
+        inputRefs.current[currentPosition + 1]?.focus()
       }
     }
   }
@@ -328,7 +322,7 @@ export const HangmanPractice = ({ vocabulary, lesson }: HangmanPracticeProps) =>
           <Button
             onClick={checkWord}
             className="w-[140px]"
-            disabled={showAnswer || !isWordComplete()}
+            disabled={showAnswer}
           >
             Check Answer
           </Button>
